@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build & test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app && xcodebuild -version
+
+      - name: Python tests
+        run: python3 -m unittest discover -s Tests -v
+
+      - name: Quota alert tests
+        run: swift test
+
+      - name: Build app bundle
+        run: bash scripts/build.sh
+
+      - name: Render panel screenshots (demo data)
+        run: |
+          mkdir -p artifacts
+          TOUTOU_DEMO=1 .build/release/TouTou --snapshot artifacts/panel
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouTou-${{ github.sha }}
+          path: |
+            dist/TouTou.app
+            artifacts/*.png
+          if-no-files-found: error

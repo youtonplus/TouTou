@@ -1,0 +1,66 @@
+name: Release
+
+# Publishes a GitHub Release with TouTou.app.zip whenever a version tag is pushed:
+#   git tag v0.3.0 && git push origin v0.3.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app && xcodebuild -version
+
+      - name: Tests
+        run: |
+          python3 -m unittest discover -s Tests -v
+          swift test
+
+      - name: Check version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PLIST=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" scripts/Info.plist)
+          if [ "$TAG" != "$PLIST" ]; then
+            echo "Tag v$TAG does not match CFBundleShortVersionString $PLIST in scripts/Info.plist" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: bash scripts/build.sh
+
+      - name: Package
+        run: |
+          cd dist
+          mv TouTou.app.zip "TouTou-${GITHUB_REF_NAME}.zip"
+          shasum -a 256 "TouTou-${GITHUB_REF_NAME}.zip" > "TouTou-${GITHUB_REF_NAME}.zip.sha256"
+          cat "TouTou-${GITHUB_REF_NAME}.zip.sha256"
+
+      - name: Release notes from CHANGELOG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Section between "## [VERSION]" and the next "## [" heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "Изменения см. в CHANGELOG.md." > notes.md; fi
+          printf '\n---\n\n**Установка:** распакуйте архив, перетащите `TouTou.app` в Программы. Сборка подписана ad-hoc: при первом запуске нажмите правой кнопкой → Открыть, либо выполните `xattr -dr com.apple.quarantine /Applications/TouTou.app`.\n' >> notes.md
+          cat notes.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TouTou ${{ github.ref_name }}
+          body_path: notes.md
+          files: |
+            dist/TouTou-${{ github.ref_name }}.zip
+            dist/TouTou-${{ github.ref_name }}.zip.sha256
